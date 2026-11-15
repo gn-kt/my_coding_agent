@@ -1,13 +1,17 @@
 type Role = "system" | "user" | "assistant" | "tool";
 
-interface ToolCall {
+export interface ToolCall {
     id: string;
-    name: string;
-    arguments: string;
+    type: "function";
+    function: {
+        name: string;
+        arguments: string;
+    };
 }
 
-interface Message {
+export interface Message {
     role: Role;
     content: string;
     tool_calls?: ToolCall[]; 
+    tool_call_id?: string;
 }
