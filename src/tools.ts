@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import type { Message, ToolCall } from "./types.js"
 
 interface Tool {
@@ -27,6 +28,44 @@ const readFile: Tool = {
 export const registry = new Map<string, Tool>();
 
 registry.set(readFile.name, readFile);
+
+const writeFileTool: Tool = {
+  name: "write_file",
+  description: "把内容写入指定路径的文件（覆盖式）",
+  parameters: {
+    type: "object",
+    properties: {
+      path: { type: "string", description: "目标文件路径" },
+      content: { type: "string", description: "要写入的内容" },
+    },
+    required: ["path", "content"],            
+  },
+  execute: (args) => {
+    const path = String(args.path);
+    const content = String(args.content);     
+    writeFileSync(path, content);
+    return `已写入 ${path}（${content.length} 个字符）`;  
+  },
+};
+
+const executeCommand: Tool = {
+  name: "execute_command",
+  description: "在用户电脑上执行一条 shell 命令，返回输出",
+  parameters: {
+    type: "object",
+    properties: {
+      command: { type: "string", description: "要执行的命令" },
+    },
+    required: ["command"],
+  },
+  execute: (args) => {
+    const command = String(args.command);    
+    return execSync(command, { encoding: "utf-8" });
+  },
+};
+
+registry.set(writeFileTool.name, writeFileTool);
+registry.set(executeCommand.name, executeCommand);
 
 export function getToolSchemas() {
     return [...registry.values()].map((tool) => ({

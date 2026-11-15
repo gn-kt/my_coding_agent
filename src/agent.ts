@@ -2,7 +2,7 @@ import type { Message } from "./types.js";
 import { chat } from "./llm.js";
 import { getToolSchemas, executeTool } from "./tools.js";
 
-const SYSTEM_PROMPT = "你是一个运行在用户电脑上的编码助手，可以用提供的工具读写文件、执行命令。回答用中文。";
+const SYSTEM_PROMPT = "你是运行在用户电脑上的编码助手。凡涉及查看或操作用户电脑上文件的任务，必须调用工具实际执行，不要只给建议、不要让用户自己动手。回答用中文。";
 
 export async function runAgent(task: string, maxSteps: number): Promise<string> {
   // 账本第一页：岗位说明书 + 用户任务（你 G0 答的「第一圈发什么」）
