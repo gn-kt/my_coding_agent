@@ -26,3 +26,5 @@
 6. **行动类任务 system prompt 必须指令语气**（「必须调用工具」）；许可语气（「可以」）模型会光说不练（验收 1 首跑 ❌ 实锤）
 7. Windows cmd 下 `ls`/`find` 不可用——模型会自己试错换成 `dir`，前提是哨兵把错误回灌给它（自愈机制实测有效）
 8. env 值全是字符串：`Number(process.env.X ?? "20")` 才是数字
+9. **外部 API 的字段拼写是对外合同，收进来必须映射**：GLM 的 usage 是 snake_case（`total_tokens`），直接 `as TokenUsage` cast 不映射 → typecheck 全绿、运行时 `totalTokens === undefined`、比较恒 false、压缩触发器永久哑火（验收 2 实锤）。坑 4 的变体：坑 4 是发出去的名字错，这条是收进来的名字没翻译——同族教训：seam 处做字段映射，别信 cast
+10. **闸门顺序：先验本地资源、再验外部依赖**——钥匙检查挡在 loadSession 前面，坏会话文件的 fail-loud 永远轮不到报（被钥匙错误掩盖）
