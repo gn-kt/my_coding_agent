@@ -107,6 +107,23 @@ test("firstKeptEntryId 不在活跃路径 → fail-loud 抛错（不静默吞）
   assert.throws(() => buildProjection([m1, ghost]), /不在活跃路径上/);
 });
 
+test("压缩后开侧枝：摘要与保留段（含 firstKept 祖先）仍在侧枝路径上", () => {
+  const m1 = msg(null, "user", "任务");
+  const m2 = msg(m1.id, "assistant", "中间步");
+  const comp = compactEntry(m2.id, "checkpoint摘要", m1.id);
+  const m3 = msg(comp.id, "assistant", "压缩后新账");
+  const b1 = msg(m3.id, "user", "【侧枝提问】闭包——请解释这个概念，用大白话。");
+  const b2 = msg(b1.id, "assistant", "闭包是……");
+  const out = buildProjection([m1, m2, comp, m3, b1, b2]);
+  // 摘要 + 保留段(m1,m2) + compaction 零贡献 + 新账(m3) + 侧枝(b1,b2)
+  assert.equal(out.length, 6);
+  assert.ok(out[0].content.includes("checkpoint摘要"));
+  assert.equal(out[1].content, "任务"); // firstKept = m1，是 compaction 的祖先，仍在活跃路径上
+  assert.equal(out[2].content, "中间步");
+  assert.equal(out[3].content, "压缩后新账");
+  assert.equal(out[5].content, "闭包是……");
+});
+
 test("renderTree：分叉渲染 ├─/└─，侧枝与注脚是兄弟", () => {
   const m1 = msg(null, "user", "主线任务");
   const b1 = msg(m1.id, "user", "【侧枝提问】闭包——请解释这个概念，用大白话。");

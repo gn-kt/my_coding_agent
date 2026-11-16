@@ -64,13 +64,14 @@ export function projectPath(path: Entry[]): Message[] {
     { role: "user", content: `【前情摘要】此前对话已压缩（原文仍在会话树中）：\n${latest.summary}` },
   ];
   for (let i = keptIdx; i < path.length; i++) {
+    // firstKept 本条含在保留段里（inclusive 合同：它是保留段的第一条，不是边界线）
     pushEntryMessage(path[i], messages);
   }
   return messages;
 }
 
-// 兼容入口：活跃叶子 = 数组最后一条（追加写 ⇒ 最后一条就是当前所在分支的叶子）。
-// 主线任务和侧枝问答都走这里——站在哪条枝上，就看到哪条枝的前史。
+// 兼容入口：活跃叶子 = 数组最后一条。前提合同：entries 必须保持追加序（数组尾 = 当前所在分支
+// 的叶子）——主线任务和侧枝问答都走这里，站在哪条枝上就看到哪条枝的前史。
 export function buildProjection(entries: Entry[]): Message[] {
   const leafId = entries.length > 0 ? entries[entries.length - 1].id : null;
   return projectPath(pathFromLeaf(entries, leafId));
@@ -86,7 +87,10 @@ export function renderTree(entries: Entry[]): string {
   }
 
   const label = (e: Entry): string => {
-    const flat = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 30);
+    const flat = (s: string) => {
+      const t = s.replace(/\s+/g, " ").trim();
+      return t.length > 30 ? `${t.slice(0, 30)}…` : t; // 截断带省略号——纯展示不骗人说「就这些」
+    };
     if (e.type === "compaction") return `📦 压缩: ${flat(e.summary)}`;
     if (e.type === "branch_summary") return `📄 注脚·${e.term}${e.passed ? "" : "（待巩固）"}: ${flat(e.summary)}`;
     const m = e.message;

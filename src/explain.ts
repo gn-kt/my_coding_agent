@@ -21,15 +21,21 @@ export function parseBranchTerm(content: string): string {
   return content.slice(BRANCH_MARKER.length).split("——")[0].trim();
 }
 
-// 复述检验判定：回复里必须带标记；缺失或【判定：不通过】都算不过（宁严勿松，intent 反例 3）
+// 复述检验判定标记：prompt 与 parser 共用同一常量——两处各写一份迟早漂移（OCR 评审采纳）
+export const VERDICT_PASS = "【判定：通过】";
+export const VERDICT_FAIL = "【判定：不通过】";
+
+// 复述检验判定：回复里必须带标记；缺失或不通过都算不过（宁严勿松，intent 反例 3）。
+// 模型输出的冒号/空格是方言（坑 4 家族）：半角「判定:」、标记里混空格都会漏判——先收编再匹配。
 export function parseVerdict(text: string): boolean {
-  if (text.includes("【判定：不通过】")) return false;
-  return text.includes("【判定：通过】");
+  const t = text.replace(/\s+/g, "").replace(/判定:/g, "判定：");
+  if (t.includes(VERDICT_FAIL)) return false;
+  return t.includes(VERDICT_PASS);
 }
 
 export const PROMPTS = {
   checkQuestion: "【系统】用户要回主线了。请基于本次解释出一道复述检验题：一题、考核核心理解、不要超纲。只出题，不要自己回答。",
-  judge: "【系统】上面是用户的复述。请先一句话点评，然后判定是否抓住要点，回复末尾必须带【判定：通过】或【判定：不通过】。",
+  judge: `【系统】上面是用户的复述。请先一句话点评，然后判定是否抓住要点，回复末尾必须带${VERDICT_PASS}或${VERDICT_FAIL}。`,
   reexplain: "【系统】复述没答到点上。请针对没答对的地方再用大白话讲一遍，讲完另出一道新的复述检验题。",
   footnote: "【系统】回主线前把本次解释链压成注脚：术语是什么、核心结论、追问过哪些点。150 字以内，纯文本。",
 } as const;

@@ -2,7 +2,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import type { Entry, Message, MessageEntry, SessionHeader } from "./types.js";
+import type { BranchSummaryEntry, Entry, Message, MessageEntry, SessionHeader } from "./types.js";
 
 const SESSIONS_DIR = path.join(process.cwd(), "sessions");
 
@@ -60,8 +60,8 @@ export function appendBranchSummary(
   stem: string,
   parentId: string | null,
   fields: { term: string; summary: string; branchLeafId: string; passed: boolean },
-): Entry {
-  return appendRaw(stem, parentId, { type: "branch_summary", ...fields });
+): BranchSummaryEntry {
+  return appendRaw(stem, parentId, { type: "branch_summary", ...fields }) as BranchSummaryEntry;
 }
 
 // 树形校验（Phase 3：从 Phase 2 的「线性成链」放宽为「合法树」——解释树要真分叉）。
@@ -104,10 +104,12 @@ export function loadSession(stem: string): { header: SessionHeader; entries: Ent
     throw new Error(`会话文件第 1 行不是 session 头：${stem}`);
   }
 
-  const entries: Entry[] = lines.slice(1).map((line) => JSON.parse(line) as Entry);
+  let entries: Entry[];
   try {
+    entries = lines.slice(1).map((line) => JSON.parse(line) as Entry);
     validateTree(entries);
   } catch (e) {
+    // 解析错（坏 JSON 行）和结构错（坏树）都带上会话名——fail-loud 且可定位
     throw new Error(`${(e as Error).message}——${stem}`);
   }
   return { header, entries };

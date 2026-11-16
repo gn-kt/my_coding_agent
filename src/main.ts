@@ -1,6 +1,6 @@
 import "./env.js";
 import { runAgent, SYSTEM_PROMPT } from "./agent.js";
-import { runRepl } from "./repl.js";
+import { runReplGuarded } from "./repl.js";
 import { createSession, loadSession, listSessions } from "./session.js";
 
 const MAX_STEPS = Number(process.env.GLM_MAX_STEPS ?? "20");
@@ -34,18 +34,19 @@ if (args[0] === "--list") {
 
 // --interactive [id]（-i）：REPL 解释树模式（Phase 3，想法 #7）。
 // 带会话 id = 从树续起（沿活跃路径还原是否在侧枝里）；不带 = 新会话。
-// 闸门顺序与 --resume 一致：先 loadSession（本地 fail-loud）再 requireKey（外部依赖）
+// 闸门顺序与 --resume 一致（坑 10）：带 id 先 loadSession（本地 fail-loud）再 requireKey（外部依赖）
 if (args[0] === "--interactive" || args[0] === "-i") {
   const stem = args[1];
-  requireKey();
   if (stem) {
     const { header, entries } = loadSession(stem);
+    requireKey();
     console.log(`交互续跑：${stem}（已有 ${entries.length} 条历史）`);
-    await runRepl({ stem, header, entries, maxSteps: MAX_STEPS, compaction: COMPACTION });
+    await runReplGuarded({ stem, header, entries, maxSteps: MAX_STEPS, compaction: COMPACTION });
   } else {
+    requireKey();
     const { stem: newStem, header } = createSession(SYSTEM_PROMPT);
     console.log(`新会话（交互模式）：${newStem}`);
-    await runRepl({ stem: newStem, header, entries: [], maxSteps: MAX_STEPS, compaction: COMPACTION });
+    await runReplGuarded({ stem: newStem, header, entries: [], maxSteps: MAX_STEPS, compaction: COMPACTION });
   }
   process.exit(0);
 }

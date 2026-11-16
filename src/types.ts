@@ -56,7 +56,7 @@ export interface BranchSummaryEntry {
     type: "branch_summary";
     term: string; // /explain 的术语——去重查它
     summary: string; // 注脚文本（模型生成的侧枝摘要）
-    branchLeafId: string; // 被摘要侧枝的叶子——审计/导航用
+    branchLeafId: string; // 被摘要侧枝的叶子——审计用（载入时不校验它）
     passed: boolean; // 复述检验结果——false = 注脚带「待巩固」标记（防假懂）
 }
 
