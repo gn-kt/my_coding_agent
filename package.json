@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/compaction.test.ts tests/projection.test.ts",
+    "test": "tsx --test tests/compaction.test.ts tests/projection.test.ts tests/session.test.ts tests/explain.test.ts",
     "dev": "tsx src/main.ts"
   },
   "devDependencies": {

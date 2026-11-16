@@ -6,15 +6,24 @@
 - 闸门 artifact：`docs/intent.md` + `docs/内核生态分配表.md`（改动前先读）
 
 ## 命令
-- `npm run dev "任务"`   # 跑 agent（任务从 argv[2] 进）
-- `npm run typecheck`    # 质检——独立于 dev，两道门都要过
+- `npm run dev "任务"`          # one-shot 跑任务（sessions/ 落 .jsonl 树）
+- `npm run dev -- --list`       # 列历史会话（免钥匙）
+- `npm run dev -- --resume <id> "任务"`  # 从树投影重建上下文续跑
+- `npm run dev -- -i [会话id]`  # REPL 解释树模式（Phase 3）：/explain /back /tree /exit
+- `npm run typecheck`           # 质检——独立于 dev，两道门都要过
+- `npm test`                    # node:test 单测 21 条（切点铁律 / 树校验 / 路径投影 / 复述判定）
 
 ## 目录约定
-- `src/types.ts`  类型合同（Role / ToolCall / Message）
-- `src/env.ts`    .env 读取器——**必须是 main.ts 第一根电线**（顺序不能动）
-- `src/tools.ts`  Tool 接口 + 注册表 + 三工具（read/write/execute）+ executeTool 哨兵
-- `src/llm.ts`    `chat()`：GLM 薄 seam + 错误守卫（200 信封里的 error 也要认）
-- `src/agent.ts`  `runAgent()` 主循环 + SYSTEM_PROMPT
+- `src/types.ts`     类型合同（Entry 判别联合：message / compaction / branch_summary）
+- `src/env.ts`       .env 读取器——**必须是 main.ts 第一根电线**（顺序不能动）
+- `src/tools.ts`     Tool 接口 + 注册表 + 三工具（read/write/execute）+ executeTool 哨兵
+- `src/llm.ts`       `chat()`：GLM 薄 seam + 错误守卫（200 信封里的 error 也要认）
+- `src/session.ts`   JSONL 树 I/O：只追加；loadSession/validateTree 树形校验 fail-loud
+- `src/projection.ts` 路径投影（叶子→根）+ 注脚消息 + renderTree（/tree）
+- `src/compaction.ts` 阈值触发 + 合法切点 + 两级摘要（路径感知，只在主线上跑）
+- `src/agent.ts`     `runAgent()` 主循环 + SYSTEM_PROMPT + 软着陆
+- `src/explain.ts`   侧枝域：talk（无工具问答）+ 复述判定标记 + 注脚 prompt
+- `src/repl.ts`      REPL 状态机（主线 ↔ 侧枝 ↔ 复述检验）+ resume 态还原
 - 钥匙在 `.env`：GLM_API_KEY / GLM_MODEL / GLM_BASE_URL（已 gitignore；真实环境变量优先于 .env）
 
 ## 踩过的坑（AI 同一个错犯第二次 → 先来这里回写）
@@ -28,3 +37,5 @@
 8. env 值全是字符串：`Number(process.env.X ?? "20")` 才是数字
 9. **外部 API 的字段拼写是对外合同，收进来必须映射**：GLM 的 usage 是 snake_case（`total_tokens`），直接 `as TokenUsage` cast 不映射 → typecheck 全绿、运行时 `totalTokens === undefined`、比较恒 false、压缩触发器永久哑火（验收 2 实锤）。坑 4 的变体：坑 4 是发出去的名字错，这条是收进来的名字没翻译——同族教训：seam 处做字段映射，别信 cast
 10. **闸门顺序：先验本地资源、再验外部依赖**——钥匙检查挡在 loadSession 前面，坏会话文件的 fail-loud 永远轮不到报（被钥匙错误掩盖）
+11. **readline 不能喂管道**：非 TTY（`printf ... | npm run dev -- -i`）时逐行 `rl.question()` 会在长 await（任务跑圈）期间被 EOF 关掉接口，恢复后必炸 `ERR_USE_AFTER_CLOSE`——非 TTY 模式要整读 stdin 自建行队列（`readFileSync(0)`），只有真人才走 readline（Phase 3 验收首跑实锤）
+12. **压缩三阈值是联动的，别单看一个**：`KEEP_RECENT_TOKENS` 小于单条工具结果的估算 token 时，切点算法从叶往回第一步就超预算、且切点之后全是 tool 条目 → 正确返回「无合法切点」不压缩——不是 bug，是阈值配错（验收回归实锤：KEEP=200 不触发，KEEP=5000 立即触发）

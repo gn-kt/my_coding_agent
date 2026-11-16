@@ -56,7 +56,41 @@ export function appendCompaction(
   return appendRaw(stem, parentId, { type: "compaction", summary, firstKeptEntryId, tokensBefore });
 }
 
-// 加载会话：fail-loud——文件缺/链断/首行不是头，一律抛错拒载，不静默吞（intent 反例 4）
+export function appendBranchSummary(
+  stem: string,
+  parentId: string | null,
+  fields: { term: string; summary: string; branchLeafId: string; passed: boolean },
+): Entry {
+  return appendRaw(stem, parentId, { type: "branch_summary", ...fields });
+}
+
+// 树形校验（Phase 3：从 Phase 2 的「线性成链」放宽为「合法树」——解释树要真分叉）。
+// 不变式：parentId = null 或指向文件中**先于本条**出现的 id（追加写 ⇒ 父必先于子 ⇒ 环天然不可能，
+// 环检测就藏在这条里）；外加唯一根 + 重复 id 两条。违反即抛错，调用方拒载（intent 反例 1）。
+export function validateTree(entries: Entry[]): void {
+  const indexOf = new Map<string, number>();
+  let rootSeen = false;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (indexOf.has(e.id)) {
+      throw new Error(`重复条目 id：${e.id}`);
+    }
+    if (e.parentId === null) {
+      if (rootSeen) {
+        throw new Error(`第二个根条目：${e.id}——树只许一个根`);
+      }
+      rootSeen = true;
+    } else {
+      // 单次前向遍历里 map 只装得下先于本条的 id——「父必先于子」在这里同时完成存在性检查与环防控
+      if (!indexOf.has(e.parentId)) {
+        throw new Error(`悬空引用：entry ${e.id} 的 parentId=${e.parentId} 在文件中不存在`);
+      }
+    }
+    indexOf.set(e.id, i);
+  }
+}
+
+// 加载会话：fail-loud——文件缺/坏头/坏树，一律抛错拒载，不静默吞（intent 反例 1）
 export function loadSession(stem: string): { header: SessionHeader; entries: Entry[] } {
   if (!existsSync(filePath(stem))) {
     throw new Error(`会话不存在：${stem}（用 --list 查看有哪些）`);
@@ -70,15 +104,11 @@ export function loadSession(stem: string): { header: SessionHeader; entries: Ent
     throw new Error(`会话文件第 1 行不是 session 头：${stem}`);
   }
 
-  const entries: Entry[] = [];
-  let prevId: string | null = null;
-  for (const line of lines.slice(1)) {
-    const entry = JSON.parse(line) as Entry;
-    if (entry.parentId !== prevId) {
-      throw new Error(`会话链断裂：entry ${entry.id} 的 parentId=${entry.parentId}，前一条 id=${prevId}——${stem}`);
-    }
-    entries.push(entry);
-    prevId = entry.id;
+  const entries: Entry[] = lines.slice(1).map((line) => JSON.parse(line) as Entry);
+  try {
+    validateTree(entries);
+  } catch (e) {
+    throw new Error(`${(e as Error).message}——${stem}`);
   }
   return { header, entries };
 }

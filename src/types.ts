@@ -48,4 +48,16 @@ export interface CompactionEntry {
     tokensBefore: number; // 压缩发生时的上下文 token 数（审计用）
 }
 
-export type Entry = MessageEntry | CompactionEntry;
+// —— Phase 3 新增：分支注脚（想法 #7，pi branch_summary 同款）——
+// /back 时侧枝摘要成注脚挂回分叉点（主线叶）下；侧枝全文不进主线上下文，注脚代表它出场
+export interface BranchSummaryEntry {
+    id: string;
+    parentId: string | null; // = 分叉点（主线叶），与侧枝根互为兄弟
+    type: "branch_summary";
+    term: string; // /explain 的术语——去重查它
+    summary: string; // 注脚文本（模型生成的侧枝摘要）
+    branchLeafId: string; // 被摘要侧枝的叶子——审计/导航用
+    passed: boolean; // 复述检验结果——false = 注脚带「待巩固」标记（防假懂）
+}
+
+export type Entry = MessageEntry | CompactionEntry | BranchSummaryEntry;

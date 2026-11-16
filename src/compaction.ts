@@ -59,6 +59,7 @@ function renderEntries(entries: Entry[]): string {
   return entries
     .map((e) => {
       if (e.type === "compaction") return `[旧压缩摘要] ${e.summary}`;
+      if (e.type === "branch_summary") return `[注脚·${e.term}] ${e.summary}`; // Phase 3：主线路径上的注脚也是历史，压缩器要看得见
       const m = e.message;
       const who = m.role === "tool" ? `工具结果(${m.tool_call_id})` : m.role;
       return `${who}: ${m.content}`;
