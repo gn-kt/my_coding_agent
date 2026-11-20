@@ -46,6 +46,7 @@ async function closeBranch(
   const branchRoot = findBranchRoot(pathFromLeaf(entries, tailId(entries)));
   if (!branchRoot) throw new Error("收枝失败：活跃路径上找不到侧枝根标记——状态机与树脱节");
   const summary = await talk(stem, header, entries, PROMPTS.footnote);
+  console.log(`—— 注脚内容 ——\n${summary}`); // 挂回主线前先亮货：用户该看到注脚写了什么
   const leaf = tailId(entries);
   if (!leaf) throw new Error("收枝失败：注脚生成后树尾为空"); // talk 后树必非空，这行给类型一个诚实的出口
   const footEntry = appendBranchSummary(stem, branchRoot.parentId, { term, summary, branchLeafId: leaf, passed });
@@ -132,7 +133,8 @@ export async function runRepl(opts: {
             console.log(`「${term}」已解释过（见注脚）：\n${seen.summary}\n想再深入就换个更具体的说法问。`);
             continue;
           }
-          await talk(stem, header, entries, makeBranchQuestion(term));
+          const answer = await talk(stem, header, entries, makeBranchQuestion(term));
+          console.log(answer);
           mode = { state: "explain", term };
           continue;
         }
@@ -144,7 +146,8 @@ export async function runRepl(opts: {
             continue;
           }
           if (mode.state === "explain") {
-            await talk(stem, header, entries, PROMPTS.checkQuestion);
+            const question = await talk(stem, header, entries, PROMPTS.checkQuestion);
+            console.log(question); // 考题必须上屏——看不见题没法复述
             mode = { state: "check", term: mode.term, attempts: 0 };
             continue;
           }
@@ -158,17 +161,18 @@ export async function runRepl(opts: {
         if (mode.state === "idle") {
           console.log(await runAgent({ stem, header, entries, task: line, maxSteps, compaction }));
         } else if (mode.state === "explain") {
-          await talk(stem, header, entries, line);
+          console.log(await talk(stem, header, entries, line));
         } else {
           // 复述检验：答案 + 判定指令（两条入账，模型一起看）
           const reply = await talk(stem, header, entries, line, PROMPTS.judge);
+          console.log(reply); // 点评 + 【判定：…】一起上屏
           const passed = parseVerdict(reply);
           if (passed || mode.attempts >= MAX_CHECK_ATTEMPTS) {
             await closeBranch(stem, header, entries, mode.term, passed);
             mode = { state: "idle" };
           } else {
             mode = { ...mode, attempts: mode.attempts + 1 };
-            await talk(stem, header, entries, PROMPTS.reexplain);
+            console.log(await talk(stem, header, entries, PROMPTS.reexplain));
             console.log(`—— 第 1 次复述未过，再讲一遍；最多 ${MAX_CHECK_ATTEMPTS + 1} 次复述机会 ——`);
           }
         }
