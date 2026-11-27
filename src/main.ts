@@ -3,6 +3,9 @@ import { runAgent, SYSTEM_PROMPT } from "./agent.js";
 import { runReplGuarded } from "./repl.js";
 import { createSession, loadSession, listSessions } from "./session.js";
 import type { GateMode } from "./approval.js";
+import { DEFAULT_MODEL } from "./llm.js";
+import { decidePrior } from "./capability.js";
+import { probeToolCalls, probeUsage } from "./probe.js";
 
 const MAX_STEPS = Number(process.env.GLM_MAX_STEPS ?? "20");
 // 压缩三阈值（spec：.env 可调；验收第 2 条靠调 GLM_RESERVE_TOKENS 压低触发线）
@@ -36,6 +39,39 @@ if (rest[0] === "--list") {
     console.log(`${s.stem}  ${s.entryCount} 条  ${s.firstTask}`);
   }
   process.exit(0);
+}
+
+// --check：模型能力两段式检查（想法 #6）。零副作用（探针只看回包不执行工具、不建会话）；
+// 硬门禁不过 = exit 1；软建议只 ⚠️ 不拦；未知模型先验缺席要明说，实测照跑
+if (rest[0] === "--check") {
+  requireKey();
+  const model = process.env.GLM_MODEL ?? DEFAULT_MODEL; // 与请求通道同一默认（OCR 采纳：防两处硬编码漂移）
+  const baseUrl = process.env.GLM_BASE_URL ?? "(默认官方端点)";
+  console.log(`🔍 模型能力两段式检查：${model} @ ${baseUrl}`);
+
+  const prior = decidePrior(model);
+  if (!prior.known) {
+    console.log("【第一段·先验】⚠️ 无先验档案——未知要明说，生死交给实测（绝不静默降级）");
+  } else {
+    console.log("【第一段·先验】（零 token，内置权威档案判级）");
+    for (const line of prior.hardLines) console.log(`  ${line}`);
+    for (const line of prior.softLines) console.log(`  ${line}`);
+    console.log(`  来源：${prior.source}`);
+    if (!prior.hardPass) {
+      console.log("🚫 硬门禁不过：模型不会开工单，主循环必然空转——不进实测（门禁拦事实）");
+      process.exit(1);
+    }
+  }
+
+  console.log("【第二段·实测】（真请求 ×2，探针只看回包不执行工具）");
+  const tool = await probeToolCalls();
+  console.log(`  工具调用探针：${tool.passed ? "✅" : "❌"} ${tool.detail}`);
+  const usage = await probeUsage();
+  console.log(`  usage 账单探针：${usage.passed ? "✅" : "❌"} ${usage.detail}`);
+
+  const failed = !tool.passed || !usage.passed;
+  console.log(failed ? "❌ 结论：实测有不及格项——如实报，不静默降级" : "✅ 结论：可用");
+  process.exit(failed ? 1 : 0);
 }
 
 console.log(
@@ -83,7 +119,7 @@ if (rest[0] === "--resume") {
 const task = rest[0];
 if (!task) {
   console.error(
-    '用法：npm run dev [--yolo] "任务描述" ｜ npm run dev -- --list ｜ npm run dev -- [--yolo] --resume <id> "任务" ｜ npm run dev -- [-i] [--yolo] [会话id]',
+    '用法：npm run dev [--yolo] "任务描述" ｜ npm run dev -- --list ｜ npm run dev -- --check ｜ npm run dev -- [--yolo] --resume <id> "任务" ｜ npm run dev -- [-i] [--yolo] [会话id]',
   );
   process.exit(1);
 }

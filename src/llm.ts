@@ -1,7 +1,7 @@
 import type { Message, TokenUsage } from "./types.js";
 
 const DEFAULT_BASE_URL = "https://open.bigmodel.cn/api/paas/v4";
-const DEFAULT_MODEL = "glm-5.3-flash";
+export const DEFAULT_MODEL = "glm-5.3-flash"; // 导出（OCR 采纳）：--check 与请求通道共用同一默认，防两处硬编码漂移
 
 export interface ChatResult {
     message: Message;
