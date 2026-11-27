@@ -1,9 +1,19 @@
+import * as readline from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 import type { Entry, SessionHeader, TokenUsage } from "./types.js";
 import { chat } from "./llm.js";
 import { getToolSchemas, executeTool } from "./tools.js";
 import { appendMessage, appendCompaction } from "./session.js";
 import { buildProjection, pathFromLeaf } from "./projection.js";
 import { shouldCompact, findCutPoint, summarize } from "./compaction.js";
+import {
+  decideGate,
+  denyResult,
+  blockResult,
+  isYes,
+  parseToolArgs,
+} from "./approval.js";
+import type { Asker, GateMode } from "./approval.js";
 
 export const SYSTEM_PROMPT = "你是运行在用户电脑上的编码助手。凡涉及查看或操作用户电脑上文件的任务，必须调用工具实际执行，不要只给建议、不要让用户自己动手。回答用中文。";
 
@@ -20,63 +30,103 @@ export async function runAgent(opts: {
   task: string;
   maxSteps: number;
   compaction: CompactionConfig;
+  gateMode: GateMode; // L0 审批门档位（main.ts 定死，缺省 safe——调用方必须显式给，agent 里不藏默认）
+  workspaceRoot: string; // 围挡根（启动时 process.cwd() 定死）
+  ask?: Asker; // 问人通道：REPL 传自家 rl；缺省自建 readline（one-shot 场景）
 }): Promise<string> {
-  const { stem, header, entries, task, maxSteps, compaction } = opts;
+  const { stem, header, entries, task, maxSteps, compaction, gateMode, workspaceRoot } = opts;
   let lastId: string | null = entries.length > 0 ? entries[entries.length - 1].id : null;
   let lastUsage: TokenUsage | null = null; // 最近一次响应的 token 账单（压缩触发靠它，pi 口径）
+  // 问人通道缺省 = 自建 readline 逐问开关（one-shot / --resume 用）；REPL 注入自家 rl 复用同一 stdin
+  const ownedRl = opts.ask ? null : readline.createInterface({ input, output });
+  const ask: Asker = opts.ask ?? (async (prompt) => isYes(await ownedRl!.question(`${prompt} (y/n) `)));
 
-  // 任务入账：模型可见即已记录——新任务/续跑任务都作为 user 条目进树
-  const taskEntry = appendMessage(stem, lastId, { role: "user", content: task });
-  entries.push(taskEntry);
-  lastId = taskEntry.id;
+  try {
+    // 任务入账：模型可见即已记录——新任务/续跑任务都作为 user 条目进树
+    const taskEntry = appendMessage(stem, lastId, { role: "user", content: task });
+    entries.push(taskEntry);
+    lastId = taskEntry.id;
 
-  for (let step = 1; step <= maxSteps; step++) {
-    const isFinalRound = step === maxSteps;
+    for (let step = 1; step <= maxSteps; step++) {
+      const isFinalRound = step === maxSteps;
 
-    // 软着陆（想法 #1）：最后一圈入账收尾指令 + 摘除工具（物理禁开单）；倒数第二圈先预警
-    if (isFinalRound) {
-      const notice = appendMessage(stem, lastId, {
-        role: "user",
-        content: "【系统】这是最后一圈步数预算：请直接给出最终回答，不要再调用任何工具。",
-      });
-      entries.push(notice);
-      lastId = notice.id;
-      console.log("—— 最后一圈，软着陆：强制文本收尾 ——");
-    } else if (step === maxSteps - 1) {
-      console.log("⚠️ 还剩 1 圈，请抓紧收尾");
+      // 软着陆（想法 #1）：最后一圈入账收尾指令 + 摘除工具（物理禁开单）；倒数第二圈先预警
+      if (isFinalRound) {
+        const notice = appendMessage(stem, lastId, {
+          role: "user",
+          content: "【系统】这是最后一圈步数预算：请直接给出最终回答，不要再调用任何工具。",
+        });
+        entries.push(notice);
+        lastId = notice.id;
+        console.log("—— 最后一圈，软着陆：强制文本收尾 ——");
+      } else if (step === maxSteps - 1) {
+        console.log("⚠️ 还剩 1 圈，请抓紧收尾");
+      }
+
+      // 压缩检查（pi 口径：发车前）。首轮还没有 usage，天然跳过
+      if (lastUsage && shouldCompact(lastUsage.totalTokens, compaction.contextWindow, compaction.reserveTokens)) {
+        const newTail = await compactIfNeeded(stem, entries, lastId, lastUsage.totalTokens, compaction);
+        if (newTail !== null) lastId = newTail;
+      }
+
+      // 投影：树 → 本圈 messages（历史是算出来的，不是存出来的）
+      const messages = [{ role: "system" as const, content: header.systemPrompt }, ...buildProjection(entries)];
+
+      console.log(`—— 第 ${step} 圈 ——`);
+      const { message: reply, usage } = await chat(messages, getToolSchemas(), isFinalRound ? "none" : "auto");
+      lastUsage = usage;
+      const replyEntry = appendMessage(stem, lastId, reply); // 账本追加：模型的回答（可能带工单）
+      entries.push(replyEntry);
+      lastId = replyEntry.id;
+
+      if (!reply.tool_calls || reply.tool_calls.length === 0) {
+        return reply.content; // 不开单 = 收工（软着陆圈摘除了工具，必然走到这）
+      }
+
+      for (const call of reply.tool_calls) {
+        console.log(`开单：${call.function.name} 参数：${call.function.arguments}`);
+
+        // L0 审批门（想法 #9）：哨兵前唯一一道门。三面单：pass 直落执行 / ask 问人 / block 硬拦。
+        // 拦与拒不执行，结果正文如实入树（方案 A）——模型看得到被拒，树讲真话。
+        const args = parseToolArgs(call);
+        const decision =
+          args === null
+            ? { kind: "block" as const, tool: call.function.name, reason: "工单参数解析失败，无法核对围挡" }
+            : decideGate(call.function.name, args, gateMode, workspaceRoot);
+
+        if (decision.kind === "block") {
+          console.log(`🚫 围挡拦截：${decision.reason}`);
+          const blocked = appendMessage(stem, lastId, blockResult(call, decision.reason));
+          entries.push(blocked);
+          lastId = blocked.id;
+          continue;
+        }
+        if (decision.kind === "ask") {
+          const ok = await ask(decision.prompt); // TTY 挂起等答（fail-closed：永不超时放行）
+          if (!ok) {
+            console.log(`—— 拒绝：${call.function.name} 未执行 ——`);
+            const denied = appendMessage(stem, lastId, denyResult(call));
+            entries.push(denied);
+            lastId = denied.id;
+            continue;
+          }
+          console.log("—— 已批准 ——");
+        }
+
+        const result = executeTool(call); // 哨兵接管（sync，内部自兜错——tools.ts try/catch）
+        const resultEntry = appendMessage(stem, lastId, result); // 结果（或错误文本）入树
+        entries.push(resultEntry);
+        lastId = resultEntry.id;
+      }
     }
 
-    // 压缩检查（pi 口径：发车前）。首轮还没有 usage，天然跳过
-    if (lastUsage && shouldCompact(lastUsage.totalTokens, compaction.contextWindow, compaction.reserveTokens)) {
-      const newTail = await compactIfNeeded(stem, entries, lastId, lastUsage.totalTokens, compaction);
-      if (newTail !== null) lastId = newTail;
-    }
-
-    // 投影：树 → 本圈 messages（历史是算出来的，不是存出来的）
-    const messages = [{ role: "system" as const, content: header.systemPrompt }, ...buildProjection(entries)];
-
-    console.log(`—— 第 ${step} 圈 ——`);
-    const { message: reply, usage } = await chat(messages, getToolSchemas(), isFinalRound ? "none" : "auto");
-    lastUsage = usage;
-    const replyEntry = appendMessage(stem, lastId, reply); // 账本追加：模型的回答（可能带工单）
-    entries.push(replyEntry);
-    lastId = replyEntry.id;
-
-    if (!reply.tool_calls || reply.tool_calls.length === 0) {
-      return reply.content; // 不开单 = 收工（软着陆圈摘除了工具，必然走到这）
-    }
-
-    for (const call of reply.tool_calls) {
-      console.log(`开单：${call.function.name} 参数：${call.function.arguments}`);
-      const result = executeTool(call); // 哨兵接管
-      const resultEntry = appendMessage(stem, lastId, result); // 结果（或错误文本）入树
-      entries.push(resultEntry);
-      lastId = resultEntry.id;
-    }
+    // 理论不可达：最后一圈摘除工具必返文本；这行只防 API 异常路径
+    return `已到 ${maxSteps} 圈硬上限，强制收工`;
+  } finally {
+    // 全出口关缺省问人通道（OCR 采纳）：硬上限 return / chat 抛错 / ask 拒绝都从这过——
+    // 只在「不开单」那一个出口关会漏掉其余路径，stdin 被拖住 → one-shot 跑完挂住不退出
+    ownedRl?.close();
   }
-
-  // 理论不可达：最后一圈摘除工具必返文本；这行只防 API 异常路径
-  return `已到 ${maxSteps} 圈硬上限，强制收工`;
 }
 
 // 压缩三步：找切点 → 两级摘要 → compaction 条目进树（原文零删除）。

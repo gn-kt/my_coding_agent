@@ -8,6 +8,8 @@ import { runAgent } from "./agent.js";
 import { appendBranchSummary } from "./session.js";
 import { pathFromLeaf, renderTree } from "./projection.js";
 import { BRANCH_MARKER, PROMPTS, makeBranchQuestion, parseBranchTerm, parseVerdict, tailId, talk } from "./explain.js";
+import { isYes } from "./approval.js";
+import type { Asker, GateMode } from "./approval.js";
 import type { Entry, MessageEntry, SessionHeader } from "./types.js";
 
 type Mode =
@@ -60,8 +62,10 @@ export async function runRepl(opts: {
   entries: Entry[];
   maxSteps: number;
   compaction: CompactionConfig;
+  gateMode: GateMode; // L0 审批门档位（main.ts 定死）
+  workspaceRoot: string; // 围挡根
 }): Promise<void> {
-  const { stem, header, entries, maxSteps, compaction } = opts;
+  const { stem, header, entries, maxSteps, compaction, gateMode, workspaceRoot } = opts;
   let mode: Mode = detectBranch(entries);
   // 坑 11：非 TTY（管道喂入）不能逐行 question——readline 会在长 await（任务跑圈）期间读到 EOF
   // 并关闭接口，恢复后 question 必炸 ERR_USE_AFTER_CLOSE。管道模式整读 stdin 自建行队列，
@@ -94,7 +98,19 @@ export async function runRepl(opts: {
     return await rl!.question(prompt);
   };
 
+  // 审批门问人通道（L0）：TTY 走自家 rl（真人不在 = 挂起等答，fail-closed 不超时放行）；
+  // 管道喂入走同一行队列——队列读尽 = 应答者链断，视为拒绝（宁可拒服务，不静默放行）
+  const ask: Asker = async (prompt) => {
+    const answer = await nextLine(`${prompt} (y/n) `);
+    if (answer === null) {
+      console.log("（应答流已尽，视为拒绝）");
+      return false;
+    }
+    return isYes(answer);
+  };
+
   console.log(`交互模式（会话 ${stem}）。${HELP}`);
+  if (gateMode === "safe") console.log("🛡️ safe 档：写入/命令会弹卡问人；批量实测加 --yolo");
   if (mode.state !== "idle") console.log(`从侧枝续起：${mode.term}（继续追问，或 /back 回主线）`);
 
   try {
@@ -159,7 +175,9 @@ export async function runRepl(opts: {
 
         // —— 普通输入按状态分派 ——
         if (mode.state === "idle") {
-          console.log(await runAgent({ stem, header, entries, task: line, maxSteps, compaction }));
+          console.log(
+            await runAgent({ stem, header, entries, task: line, maxSteps, compaction, gateMode, workspaceRoot, ask }),
+          );
         } else if (mode.state === "explain") {
           console.log(await talk(stem, header, entries, line));
         } else {
