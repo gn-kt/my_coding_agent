@@ -77,6 +77,18 @@ export function buildProjection(entries: Entry[]): Message[] {
   return projectPath(pathFromLeaf(entries, leafId));
 }
 
+// 单珠一行标签（纯展示，/tree 与观测者共用——格式只此一家，防两处漂移）
+export function entryLabel(e: Entry): string {
+  const flat = (s: string) => {
+    const t = s.replace(/\s+/g, " ").trim();
+    return t.length > 30 ? `${t.slice(0, 30)}…` : t; // 截断带省略号——纯展示不骗人说「就这些」
+  };
+  if (e.type === "compaction") return `📦 压缩: ${flat(e.summary)}`;
+  if (e.type === "branch_summary") return `📄 注脚·${e.term}${e.passed ? "" : "（待巩固）"}: ${flat(e.summary)}`;
+  const m = e.message;
+  return `${m.role}: ${flat(m.content)}`;
+}
+
 // 树形文本（/tree 用）：根 → 叶深度优先，分叉处 ├─/└─，每行带 id 方便 /resume 定位。纯展示。
 export function renderTree(entries: Entry[]): string {
   const children = new Map<string | null, Entry[]>();
@@ -86,24 +98,12 @@ export function renderTree(entries: Entry[]): string {
     children.set(e.parentId, list);
   }
 
-  const label = (e: Entry): string => {
-    const flat = (s: string) => {
-      const t = s.replace(/\s+/g, " ").trim();
-      return t.length > 30 ? `${t.slice(0, 30)}…` : t; // 截断带省略号——纯展示不骗人说「就这些」
-    };
-    if (e.type === "compaction") return `📦 压缩: ${flat(e.summary)}`;
-    if (e.type === "branch_summary") return `📄 注脚·${e.term}${e.passed ? "" : "（待巩固）"}: ${flat(e.summary)}`;
-    const m = e.message;
-    const who = m.role === "tool" ? "tool" : m.role;
-    return `${who}: ${flat(m.content)}`;
-  };
-
   const lines: string[] = [];
   const walk = (parentId: string | null, prefix: string): void => {
     const list = children.get(parentId) ?? [];
     list.forEach((e, i) => {
       const isLast = i === list.length - 1;
-      lines.push(`${prefix}${isLast ? "└─ " : "├─ "}${label(e)} [${e.id}]`);
+      lines.push(`${prefix}${isLast ? "└─ " : "├─ "}${entryLabel(e)} [${e.id}]`);
       walk(e.id, prefix + (isLast ? "   " : "│  "));
     });
   };

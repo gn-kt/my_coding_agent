@@ -8,10 +8,13 @@
 ## 命令
 - `npm run dev "任务"`          # one-shot 跑任务（sessions/ 落 .jsonl 树）
 - `npm run dev -- --list`       # 列历史会话（免钥匙）
+- `npm run dev -- --check`      # 模型能力两段式检查（想法 #6，免钥匙不可——探针真发请求；零会话副作用）
 - `npm run dev -- --resume <id> "任务"`  # 从树投影重建上下文续跑
 - `npm run dev -- -i [会话id]`  # REPL 解释树模式（Phase 3）：/explain /back /tree /exit
+- `npm run dev -- [--yolo] …`   # 审批档位（想法 #9）：缺省 safe 弹卡问人，--yolo 全放行（围挡仍生效）
+- `npm run dev -- --watch <id>` # 只读观测者（想法 #8 L0）：第二进程旁观会话，免钥匙零 token，写不进一个字
 - `npm run typecheck`           # 质检——独立于 dev，两道门都要过
-- `npm test`                    # node:test 单测 21 条（切点铁律 / 树校验 / 路径投影 / 复述判定）
+- `npm test`                    # node:test 单测 55 条（切点铁律 / 树校验 / 路径投影 / 复述判定 / 审批门 / 能力档案 / 探针 / 观测者）
 
 ## 目录约定
 - `src/types.ts`     类型合同（Entry 判别联合：message / compaction / branch_summary）
@@ -24,6 +27,10 @@
 - `src/agent.ts`     `runAgent()` 主循环 + SYSTEM_PROMPT + 软着陆
 - `src/explain.ts`   侧枝域：talk（无工具问答）+ 复述判定标记 + 注脚 prompt
 - `src/repl.ts`      REPL 状态机（主线 ↔ 侧枝 ↔ 复述检验）+ resume 态还原
+- `src/approval.ts`  L0 审批门（想法 #9）：pass/ask/block 三面单 + 工作区围挡 + fail-closed
+- `src/capability.ts` 模型权威档案先验判级（想法 #6 上半：零 token 纯函数）
+- `src/probe.ts`     模型实测探针（想法 #6 下半：工具调用/usage 两探针，判据与主循环同一把刀）
+- `src/watch.ts`     只读观测者（想法 #8 L0）：轮询 tail + 宽容解析（尾行半行等下轮，中间行损坏 fail-loud）+ 状态快照（detectBranch 同一把刀）
 - 钥匙在 `.env`：GLM_API_KEY / GLM_MODEL / GLM_BASE_URL（已 gitignore；真实环境变量优先于 .env）
 
 ## 踩过的坑（AI 同一个错犯第二次 → 先来这里回写）

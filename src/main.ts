@@ -74,6 +74,23 @@ if (rest[0] === "--check") {
   process.exit(failed ? 1 : 0);
 }
 
+// --watch <id>：只读观测者（想法 #8 L0）。纯本地读树——不验钥匙、不进审批档位、零 token
+if (rest[0] === "--watch") {
+  const stem = rest[1];
+  if (!stem) {
+    console.error("用法：npm run dev -- --watch <会话id>");
+    process.exit(1);
+  }
+  const { startWatch } = await import("./watch.js");
+  try {
+    await startWatch(stem);
+  } catch (e) {
+    console.error(`观测者退出：${(e as Error).message}`);
+    process.exit(1);
+  }
+  process.exit(0); // 观测者只有 Ctrl+C 一种正常离开方式（信号直接杀进程）——兜底防漏进任务路径
+}
+
 console.log(
   gateMode === "safe"
     ? `🛡️ safe 档：写入/命令会弹卡问人 ｜ 围挡=${WORKSPACE_ROOT}（批量实测加 --yolo）`
@@ -119,7 +136,7 @@ if (rest[0] === "--resume") {
 const task = rest[0];
 if (!task) {
   console.error(
-    '用法：npm run dev [--yolo] "任务描述" ｜ npm run dev -- --list ｜ npm run dev -- --check ｜ npm run dev -- [--yolo] --resume <id> "任务" ｜ npm run dev -- [-i] [--yolo] [会话id]',
+    '用法：npm run dev [--yolo] "任务描述" ｜ npm run dev -- --list ｜ npm run dev -- --check ｜ npm run dev -- [--yolo] --resume <id> "任务" ｜ npm run dev -- [-i] [--yolo] [会话id] ｜ npm run dev -- --watch <id>',
   );
   process.exit(1);
 }
